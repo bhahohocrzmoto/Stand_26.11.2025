@@ -106,7 +106,7 @@ def ensure_analysis_dirs(spiral_path: Path) -> Dict[str, Path]:
     ports_dir = analysis / "ports"
     analysis.mkdir(exist_ok=True)
     matrices_dir.mkdir(parents=True, exist_ok=True)
-    ports_dir.mkdir(parents=True, exist_ok=True)
+    # ports_dir.mkdir(parents=True, exist_ok=True)  # disabled (no per-port exports)
     return {
         "analysis": analysis,
         "matrices": matrices_dir,
@@ -933,128 +933,128 @@ def process_spiral(
     json_name = f"{analysis_label}_matrices.json"
     write_matrix_json(payload, matrices_dir / json_name)
 
-    # Per-port metrics and plots
-    #  - summary_rows_all: all frequencies for summary_spiral.csv
-    summary_rows_all: List[Dict[str, object]] = []
+    # Per-port metrics and plots (temporarily disabled at user request)
+    # #  - summary_rows_all: all frequencies for summary_spiral.csv
+    # summary_rows_all: List[Dict[str, object]] = []
+    #
+    # for p_idx, port_name in enumerate(port_names):
+    #     R_diag = R_port[:, p_idx, p_idx]
+    #     L_diag = L_port[:, p_idx, p_idx]
+    #     L_eff, R_eff, Q = effective_values_from_diag(freq, R_diag, L_diag)
+    #     Zin = R_eff + 1j * 2 * math.pi * freq * L_eff
+    #     resonance = find_resonance(freq, Zin)
+    #
+    #     key_L = interpolate_values(KEY_FREQS, freq, L_eff)
+    #     key_R = interpolate_values(KEY_FREQS, freq, R_eff)
+    #     key_Q = interpolate_values(KEY_FREQS, freq, Q)
+    #
+    #     port_dir = dirs["ports"] / port_name
+    #     port_dir.mkdir(parents=True, exist_ok=True)
+    #
+    #     # short CSV with key frequencies (unchanged)
+    #     metrics_rows = []
+    #     for kf in KEY_FREQS:
+    #         metrics_rows.append(
+    #             {
+    #                 "spiral_name": spiral_name,
+    #                 "port_name": port_name,
+    #                 "freq_Hz": kf,
+    #                 "L_eff_H": key_L[kf],
+    #                 "R_eff_ohm": key_R[kf],
+    #                 "Q": key_Q[kf],
+    #                 "first_resonance_Hz": resonance,
+    #             }
+    #         )
+    #     pd.DataFrame(metrics_rows).to_csv(port_dir / "metrics.csv", index=False)
+    #
+    #     # Full Z_in vs f CSV (Bode data) (unchanged)
+    #     zin_df = pd.DataFrame(
+    #         {
+    #             "freq_Hz": freq,
+    #             "Re_Zin_ohm": np.real(Zin),
+    #             "Im_Zin_ohm": np.imag(Zin),
+    #             "abs_Zin_ohm": np.abs(Zin),
+    #             "phase_Zin_deg": np.angle(Zin, deg=True),
+    #         }
+    #     )
+    #     zin_df.to_csv(port_dir / "Z_in_vs_f.csv", index=False)
+    #
+    #     # Plots: L, R, Q, |Zin| (unchanged)
+    #     plot_vs_frequency(
+    #         freq,
+    #         L_eff,
+    #         "L_eff (H)",
+    #         f"Effective Inductance vs Frequency - {spiral_name} / {port_name}",
+    #         port_dir / "L_eff_vs_f.png",
+    #     )
+    #     plot_vs_frequency(
+    #         freq,
+    #         R_eff,
+    #         "R_eff (Ohm)",
+    #         f"Effective Resistance vs Frequency - {spiral_name} / {port_name}",
+    #         port_dir / "R_eff_vs_f.png",
+    #     )
+    #     plot_vs_frequency(
+    #         freq,
+    #         Q,
+    #         "Q",
+    #         f"Quality Factor vs Frequency - {spiral_name} / {port_name}",
+    #         port_dir / "Q_vs_f.png",
+    #     )
+    #     plot_vs_frequency(
+    #         freq,
+    #         np.abs(Zin),
+    #         "|Z_in| (Ohm)",
+    #         f"|Z_in| vs Frequency - {spiral_name} / {port_name}",
+    #         port_dir / "Zin_mag_vs_f.png",
+    #     )
+    #
+    #     # --- 1) Add ALL frequencies to per-spiral summary ---
+    #     for f_val, Lf, Rf, Qf in zip(freq, L_eff, R_eff, Q):
+    #         summary_rows_all.append(
+    #             {
+    #                 "spiral_name": spiral_name,
+    #                 "port_name": port_name,
+    #                 "freq_Hz": float(f_val),
+    #                 "L_eff_H": float(Lf),
+    #                 "R_eff_ohm": float(Rf),
+    #                 "Q": float(Qf),
+    #                 "first_resonance_Hz": resonance,
+    #             }
+    #         )
+    #
+    #     # --- 2) Single design-frequency snapshot for global summary ---
+    #     ref_L = float(np.interp(REF_FREQ, freq, L_eff))
+    #     ref_R = float(np.interp(REF_FREQ, freq, R_eff))
+    #     ref_Q = float(np.interp(REF_FREQ, freq, Q))
+    #
+    #     row_ref = {
+    #         "spiral_name": spiral_name,
+    #         "port_name": port_name,
+    #         "ref_freq_Hz": REF_FREQ,
+    #         "L_eff_H": ref_L,
+    #         "R_eff_ohm": ref_R,
+    #         "Q": ref_Q,
+    #         "first_resonance_Hz": resonance,
+    #     }
+    #     global_records.append(
+    #         {
+    #             **row_ref,
+    #             "N_conductors": n,
+    #             "N_ports": n_ports,
+    #             "system_type": system_type,
+    #         }
+    #     )
 
-    for p_idx, port_name in enumerate(port_names):
-        R_diag = R_port[:, p_idx, p_idx]
-        L_diag = L_port[:, p_idx, p_idx]
-        L_eff, R_eff, Q = effective_values_from_diag(freq, R_diag, L_diag)
-        Zin = R_eff + 1j * 2 * math.pi * freq * L_eff
-        resonance = find_resonance(freq, Zin)
+    # Per-spiral summary CSV: all frequencies for each port (disabled)
+    # if summary_rows_all:
+    #     pd.DataFrame(summary_rows_all).to_csv(dirs["summary_spiral"], index=False)
 
-        key_L = interpolate_values(KEY_FREQS, freq, L_eff)
-        key_R = interpolate_values(KEY_FREQS, freq, R_eff)
-        key_Q = interpolate_values(KEY_FREQS, freq, Q)
-
-        port_dir = dirs["ports"] / port_name
-        port_dir.mkdir(parents=True, exist_ok=True)
-
-        # short CSV with key frequencies (unchanged)
-        metrics_rows = []
-        for kf in KEY_FREQS:
-            metrics_rows.append(
-                {
-                    "spiral_name": spiral_name,
-                    "port_name": port_name,
-                    "freq_Hz": kf,
-                    "L_eff_H": key_L[kf],
-                    "R_eff_ohm": key_R[kf],
-                    "Q": key_Q[kf],
-                    "first_resonance_Hz": resonance,
-                }
-            )
-        pd.DataFrame(metrics_rows).to_csv(port_dir / "metrics.csv", index=False)
-
-        # Full Z_in vs f CSV (Bode data) (unchanged)
-        zin_df = pd.DataFrame(
-            {
-                "freq_Hz": freq,
-                "Re_Zin_ohm": np.real(Zin),
-                "Im_Zin_ohm": np.imag(Zin),
-                "abs_Zin_ohm": np.abs(Zin),
-                "phase_Zin_deg": np.angle(Zin, deg=True),
-            }
-        )
-        zin_df.to_csv(port_dir / "Z_in_vs_f.csv", index=False)
-
-        # Plots: L, R, Q, |Zin| (unchanged)
-        plot_vs_frequency(
-            freq,
-            L_eff,
-            "L_eff (H)",
-            f"Effective Inductance vs Frequency - {spiral_name} / {port_name}",
-            port_dir / "L_eff_vs_f.png",
-        )
-        plot_vs_frequency(
-            freq,
-            R_eff,
-            "R_eff (Ohm)",
-            f"Effective Resistance vs Frequency - {spiral_name} / {port_name}",
-            port_dir / "R_eff_vs_f.png",
-        )
-        plot_vs_frequency(
-            freq,
-            Q,
-            "Q",
-            f"Quality Factor vs Frequency - {spiral_name} / {port_name}",
-            port_dir / "Q_vs_f.png",
-        )
-        plot_vs_frequency(
-            freq,
-            np.abs(Zin),
-            "|Z_in| (Ohm)",
-            f"|Z_in| vs Frequency - {spiral_name} / {port_name}",
-            port_dir / "Zin_mag_vs_f.png",
-        )
-
-        # --- 1) Add ALL frequencies to per-spiral summary ---
-        for f_val, Lf, Rf, Qf in zip(freq, L_eff, R_eff, Q):
-            summary_rows_all.append(
-                {
-                    "spiral_name": spiral_name,
-                    "port_name": port_name,
-                    "freq_Hz": float(f_val),
-                    "L_eff_H": float(Lf),
-                    "R_eff_ohm": float(Rf),
-                    "Q": float(Qf),
-                    "first_resonance_Hz": resonance,
-                }
-            )
-
-        # --- 2) Single design-frequency snapshot for global summary ---
-        ref_L = float(np.interp(REF_FREQ, freq, L_eff))
-        ref_R = float(np.interp(REF_FREQ, freq, R_eff))
-        ref_Q = float(np.interp(REF_FREQ, freq, Q))
-
-        row_ref = {
-            "spiral_name": spiral_name,
-            "port_name": port_name,
-            "ref_freq_Hz": REF_FREQ,
-            "L_eff_H": ref_L,
-            "R_eff_ohm": ref_R,
-            "Q": ref_Q,
-            "first_resonance_Hz": resonance,
-        }
-        global_records.append(
-            {
-                **row_ref,
-                "N_conductors": n,
-                "N_ports": n_ports,
-                "system_type": system_type,
-            }
-        )
-
-    # Per-spiral summary CSV: all frequencies for each port
-    if summary_rows_all:
-        pd.DataFrame(summary_rows_all).to_csv(dirs["summary_spiral"], index=False)
-
-    # Transformer-style metrics, only if relevant ports exist
-    if system_type.lower() in ("auto", "transformer"):
-        tmetrics = compute_transformer_metrics(freq, L_port, port_names)
-        if tmetrics:
-            pd.DataFrame(tmetrics).to_csv(dirs["transformer_metrics"], index=False)
+    # Transformer-style metrics, only if relevant ports exist (disabled)
+    # if system_type.lower() in ("auto", "transformer"):
+    #     tmetrics = compute_transformer_metrics(freq, L_port, port_names)
+    #     if tmetrics:
+    #         pd.DataFrame(tmetrics).to_csv(dirs["transformer_metrics"], index=False)
 
 
 
@@ -1063,13 +1063,14 @@ def process_spiral(
 # ---------------------------------------------------------------------------
 
 
-def write_global_summary(root: Path, records: List[Dict[str, object]]) -> None:
-    if not records:
-        return
-    report_dir = root / "Global_Report"
-    report_dir.mkdir(exist_ok=True)
-    df = pd.DataFrame(records)
-    df.to_csv(report_dir / "summary_all_spirals.csv", index=False)
+# def write_global_summary(root: Path, records: List[Dict[str, object]]) -> None:
+#     """Disabled: global summary aggregation was removed per user request."""
+#     if not records:
+#         return
+#     report_dir = root / "Global_Report"
+#     report_dir.mkdir(exist_ok=True)
+#     df = pd.DataFrame(records)
+#     df.to_csv(report_dir / "summary_all_spirals.csv", index=False)
 
 
 # ---------------------------------------------------------------------------
@@ -1101,7 +1102,7 @@ def main() -> None:
             print(f"Unexpected error for {spiral_path}: {exc}")
             append_debug_entry(debug_log, spiral=spiral_path.name, stage="unexpected", reason=str(exc))
 
-    write_global_summary(address_path.parent, global_records)
+    # write_global_summary(address_path.parent, global_records)
     print("Processing complete.")
 
 
