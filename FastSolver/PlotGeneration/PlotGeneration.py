@@ -35,6 +35,9 @@ KEY_FREQS = [10e3, 50e3, 100e3, 200e3, 500e3, 1e6]
 # Reference frequency for summaries / transformer metrics
 REF_FREQ = 100e3
 
+# Debug log key for JSON log files written by this module
+DEBUG_LOG_NAME = "PlotGenerationDebug.json"
+
 
 # ---------------------------------------------------------------------------
 # Helpers for Address.txt and directory layout
@@ -111,7 +114,30 @@ def ensure_analysis_dirs(spiral_path: Path) -> Dict[str, Path]:
         "ports_config": analysis / "ports_config.json",
         "summary_spiral": analysis / "summary_spiral.csv",
         "transformer_metrics": analysis / "transformer_metrics.csv",
+        "debug_log": spiral_path.parent / DEBUG_LOG_NAME,
     }
+
+
+def append_debug_entry(log_path: Path, *, spiral: str, stage: str, reason: str) -> None:
+    """Append a structured debug entry to a JSON log file.
+
+    The log is a list of objects with fields: spiral, stage, reason.
+    Failures to write are intentionally silent to avoid interrupting the main flow.
+    """
+
+    entry = {"spiral": spiral, "stage": stage, "reason": reason}
+    try:
+        if log_path.exists():
+            data = json.loads(log_path.read_text())
+            if not isinstance(data, list):
+                data = []
+        else:
+            data = []
+        data.append(entry)
+        log_path.write_text(json.dumps(data, indent=2))
+    except Exception:
+        # Debug logging should never break the analysis
+        return
 
 
 # ---------------------------------------------------------------------------
@@ -547,6 +573,101 @@ def save_matrix_csv(matrix: np.ndarray, path: Path) -> None:
     df.to_csv(path, index=False, header=False)
 
 
+def build_matrix_payload(
+    *,
+    spiral_name: str,
+    analysis_type: str,
+    port_names: List[str],
+    freq: np.ndarray,
+    C_port: np.ndarray,
+    R_port: np.ndarray,
+    L_port: np.ndarray,
+    source_files: Dict[str, str],
+) -> Dict[str, object]:
+    """Prepare a serialisable dict containing port-domain matrices.
+
+    The payload intentionally captures the complete frequency sweep so we avoid
+    scattering multiple CSV snapshots across the Analysis folder.
+    """
+
+    return {
+        "spiral_name": spiral_name,
+        "analysis_type": analysis_type,
+        "port_names": port_names,
+        "frequencies_Hz": np.asarray(freq, dtype=float).tolist(),
+        "units": {"C": "F", "R": "ohm", "L": "H"},
+        "source_files": source_files,
+        "matrices": {
+            "C_port": np.asarray(C_port, dtype=float).tolist(),
+            "R_port": np.asarray(R_port, dtype=float).tolist(),
+            "L_port": np.asarray(L_port, dtype=float).tolist(),
+        },
+    }
+
+
+def write_matrix_json(payload: Dict[str, object], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2))
+
+
+def load_matrix_json(path: Path) -> Dict[str, object]:
+    return json.loads(path.read_text())
+
+
+def export_matrix_json_to_excel(json_path: Path, output_path: Optional[Path] = None) -> Path:
+    """Convert a matrix JSON file into a human-friendly Excel workbook.
+
+    A sheet is produced for every frequency, containing R and L matrices with
+    port names as both row and column labels. Capacitance is constant, so it is
+    shown once on a dedicated sheet.
+    """
+
+    data = load_matrix_json(json_path)
+    port_names: List[str] = list(data.get("port_names", []))
+    freq: List[float] = list(data.get("frequencies_Hz", []))
+    matrices: Dict[str, List] = data.get("matrices", {})  # type: ignore[assignment]
+
+    if output_path is None:
+        output_path = json_path.with_name(json_path.stem + "_readable.xlsx")
+
+    C_port = np.array(matrices.get("C_port", []), dtype=float)
+    R_port = np.array(matrices.get("R_port", []), dtype=float)
+    L_port = np.array(matrices.get("L_port", []), dtype=float)
+
+    with pd.ExcelWriter(output_path) as writer:
+        # Capacitance (single sheet)
+        if C_port.size:
+            df_c = pd.DataFrame(C_port, index=port_names, columns=port_names)
+            df_c.to_excel(writer, sheet_name="C_port")
+
+        # One sheet per frequency for R and L
+        for idx, f in enumerate(freq):
+            sheet = f"f_{int(f)}Hz"
+            r_mat = R_port[idx] if R_port.ndim == 3 and idx < R_port.shape[0] else []
+            l_mat = L_port[idx] if L_port.ndim == 3 and idx < L_port.shape[0] else []
+
+            rows: List[pd.DataFrame] = []
+            if np.size(r_mat):
+                rows.append(pd.DataFrame(r_mat, index=port_names, columns=port_names))
+            if np.size(l_mat):
+                rows.append(pd.DataFrame(l_mat, index=port_names, columns=port_names))
+
+            if not rows:
+                continue
+
+            # Stack R and L vertically with blank spacer
+            spacer = pd.DataFrame([["" for _ in port_names]], columns=port_names)
+            combined = []
+            if rows:
+                combined.append(rows[0])
+            if len(rows) == 2:
+                combined.extend([spacer, rows[1]])
+            final_df = pd.concat(combined, axis=0)
+            final_df.to_excel(writer, sheet_name=sheet)
+
+    return output_path
+
+
 def plot_vs_frequency(
     freq: np.ndarray,
     values: np.ndarray,
@@ -706,6 +827,7 @@ def process_spiral(
     *,
     ports_override: Optional[Dict[str, Dict[str, object]]] = None,
     auto_reuse_ports: bool = False,
+    debug_log_path: Optional[Path] = None,
 ) -> None:
     """
     Process one spiral variant:
@@ -719,12 +841,16 @@ def process_spiral(
     fastsolver = spiral_path / "FastSolver"
     if not fastsolver.exists():
         print(f"Warning: FastSolver folder missing for {spiral_name}, skipping.")
+        if debug_log_path:
+            append_debug_entry(debug_log_path, spiral=spiral_name, stage="precheck", reason="FastSolver folder missing")
         return
 
     cap_path = fastsolver / "CapacitanceMatrix.txt"
     zc_path = fastsolver / "Zc.mat"
     if not cap_path.exists() or not zc_path.exists():
         print(f"Warning: Required files missing in {fastsolver}, skipping {spiral_name}.")
+        if debug_log_path:
+            append_debug_entry(debug_log_path, spiral=spiral_name, stage="precheck", reason="CapacitanceMatrix.txt or Zc.mat missing")
         return
 
     dirs = ensure_analysis_dirs(spiral_path)
@@ -734,15 +860,16 @@ def process_spiral(
         freq, Z_trace = load_impedance_and_freq(zc_path)
     except Exception as exc:  # noqa: BLE001
         print(f"Error processing {spiral_name}: {exc}")
+        if debug_log_path:
+            append_debug_entry(debug_log_path, spiral=spiral_name, stage="load", reason=str(exc))
         return
 
     n = C_trace.shape[0]
     if C_trace.shape[1] != n or Z_trace.shape[1] != n or Z_trace.shape[2] != n:
         print(f"Dimension mismatch for {spiral_name}, skipping.")
+        if debug_log_path:
+            append_debug_entry(debug_log_path, spiral=spiral_name, stage="shape", reason="Capacitance / impedance dimensions mismatch")
         return
-
-    # Save raw trace-domain C matrix for reference
-    save_matrix_csv(C_trace, dirs["matrices"] / "C_trace.csv")
 
     # Get ports either from GUI override or CLI interaction
     ports = interactive_ports_config(
@@ -753,6 +880,8 @@ def process_spiral(
     )
     if not ports:
         print(f"No ports defined for {spiral_name}, skipping.")
+        if debug_log_path:
+            append_debug_entry(debug_log_path, spiral=spiral_name, stage="ports", reason="No ports defined")
         return
 
     # Optional: read system_type from config if present (defaults to "auto")
@@ -785,17 +914,24 @@ def process_spiral(
         L_port[k] = Lk
         Z_port[k] = Rk + 1j * 2 * math.pi * f * Lk
 
-    # Save port-domain C matrix, and R/L/Z at a representative frequency
+    # Persist matrices in a single JSON payload to avoid multiple CSV snapshots
     matrices_dir = dirs["matrices"]
-    save_matrix_csv(C_port, matrices_dir / "C_port.csv")
+    analysis_label = system_type.lower()
+    if analysis_label not in {"inductor", "transformer"}:
+        analysis_label = "hybrid" if analysis_label != "auto" else "inductor"
 
-    # Pick nearest available index to REF_FREQ for matrix snapshots
-    idx_ref = int(np.argmin(np.abs(freq - REF_FREQ)))
-    f_ref = float(freq[idx_ref])
-    save_matrix_csv(R_port[idx_ref], matrices_dir / f"R_port_{int(f_ref)}Hz.csv")
-    save_matrix_csv(L_port[idx_ref], matrices_dir / f"L_port_{int(f_ref)}Hz.csv")
-    save_matrix_csv(Z_port[idx_ref].real, matrices_dir / f"Z_port_real_{int(f_ref)}Hz.csv")
-    save_matrix_csv(Z_port[idx_ref].imag, matrices_dir / f"Z_port_imag_{int(f_ref)}Hz.csv")
+    payload = build_matrix_payload(
+        spiral_name=spiral_name,
+        analysis_type=analysis_label,
+        port_names=port_names,
+        freq=freq,
+        C_port=C_port,
+        R_port=R_port,
+        L_port=L_port,
+        source_files={"Zc": str(zc_path), "CapacitanceMatrix": str(cap_path)},
+    )
+    json_name = f"{analysis_label}_matrices.json"
+    write_matrix_json(payload, matrices_dir / json_name)
 
     # Per-port metrics and plots
     #  - summary_rows_all: all frequencies for summary_spiral.csv
@@ -950,15 +1086,20 @@ def main() -> None:
         print("No spiral addresses found in Address.txt")
         return
 
+    debug_log = address_path.parent / DEBUG_LOG_NAME
+    debug_log.unlink(missing_ok=True)
+
     global_records: List[Dict[str, object]] = []
     for spiral_path in spirals:
         if not spiral_path.exists():
             print(f"Warning: Spiral path does not exist: {spiral_path}")
+            append_debug_entry(debug_log, spiral=spiral_path.name, stage="precheck", reason="Spiral folder missing")
             continue
         try:
-            process_spiral(spiral_path, global_records)
+            process_spiral(spiral_path, global_records, debug_log_path=debug_log)
         except Exception as exc:  # noqa: BLE001
             print(f"Unexpected error for {spiral_path}: {exc}")
+            append_debug_entry(debug_log, spiral=spiral_path.name, stage="unexpected", reason=str(exc))
 
     write_global_summary(address_path.parent, global_records)
     print("Processing complete.")

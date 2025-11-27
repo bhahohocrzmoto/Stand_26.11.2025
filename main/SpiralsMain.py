@@ -401,16 +401,21 @@ class PortsPopup(tk.Toplevel):
         primary_layers = self._parse_layer_selection(self.var_primary_layers.get())
         secondary_layers = self._parse_layer_selection(self.var_secondary_layers.get())
 
+        debug_log = self.address_file.parent / PG.DEBUG_LOG_NAME
+        debug_log.unlink(missing_ok=True)
+
         records: List[Dict[str, object]] = []
         for path in self.spiral_paths:
             layers = self._get_layers_info(path)
             total = sum(int(item["K"]) for item in layers)
             if not total:
                 append_line(na_path, path.name)
+                PG.append_debug_entry(debug_log, spiral=path.name, stage="precheck", reason="No conductors found")
                 continue
             wire_sections = path / "Wire_Sections.txt"
             if not wire_sections.exists():
                 append_line(na_path, path.name)
+                PG.append_debug_entry(debug_log, spiral=path.name, stage="precheck", reason="Wire_Sections.txt missing")
                 continue
 
             ports: Dict[str, Dict[str, object]] = {}
@@ -423,6 +428,7 @@ class PortsPopup(tk.Toplevel):
                     if not (zc_path.exists() and cap_path.exists()):
                         append_line(na_parallel, path.name)
                         append_line(na_path, path.name)
+                        PG.append_debug_entry(debug_log, spiral=path.name, stage="inductor", reason="Missing Zc.mat/CapacitanceMatrix.txt for parallel analysis")
                     else:
                         indices = list(range(total))
                         ports["Port_all_Parallel"] = {
@@ -437,6 +443,7 @@ class PortsPopup(tk.Toplevel):
                     if not ok_series:
                         append_line(na_series, path.name)
                         append_line(na_path, path.name)
+                        PG.append_debug_entry(debug_log, spiral=path.name, stage="inductor", reason="Series validation failed")
                     else:
                         ports["Port_all_Series"] = {
                             "type": "series",
@@ -448,6 +455,7 @@ class PortsPopup(tk.Toplevel):
                 tx_ports = self._build_transformer_ports(layers, primary_layers, secondary_layers, phase_count)
                 if tx_ports is None:
                     append_line(na_tx, path.name)
+                    PG.append_debug_entry(debug_log, spiral=path.name, stage="transformer", reason="Transformer port validation failed")
                 else:
                     ports.update(tx_ports)
 
@@ -455,8 +463,15 @@ class PortsPopup(tk.Toplevel):
                 continue
 
             dirs = PG.ensure_analysis_dirs(path)
-            dirs["ports_config"].write_text(json.dumps({"ports": ports}, indent=2))
-            PG.process_spiral(path, records, ports_override=ports, auto_reuse_ports=False)
+            system_type = "hybrid" if enable_inductor and enable_tx else ("transformer" if enable_tx else "inductor")
+            dirs["ports_config"].write_text(json.dumps({"ports": ports, "system_type": system_type}, indent=2))
+            PG.process_spiral(
+                path,
+                records,
+                ports_override=ports,
+                auto_reuse_ports=False,
+                debug_log_path=debug_log,
+            )
 
         if records:
             PG.write_global_summary(self.address_file.parent, records)
@@ -477,6 +492,7 @@ class MainApp(tk.Tk):
 
         self.var_address = tk.StringVar()
         self.var_eps = tk.StringVar(value="3.5")
+        self.var_matrix_json = tk.StringVar()
 
         self._build_ui()
 
@@ -503,6 +519,14 @@ class MainApp(tk.Tk):
         solver.pack(fill="x", padx=10, pady=8)
         ttk.Button(solver, text="Run conversion + solvers", command=self._run_pipeline).pack(side="left", padx=6, pady=6)
         ttk.Button(solver, text="Configure ports / plots", command=self._open_ports_popup).pack(side="left", padx=6)
+
+        viewer = ttk.LabelFrame(self, text="4) Matrix review")
+        viewer.pack(fill="x", padx=10, pady=8)
+        row_json = ttk.Frame(viewer); row_json.pack(fill="x", pady=4, padx=6)
+        ttk.Label(row_json, text="Matrix JSON:").pack(side="left")
+        ttk.Entry(row_json, textvariable=self.var_matrix_json, width=70).pack(side="left", padx=6)
+        ttk.Button(row_json, text="Browse…", command=self._browse_matrix_json).pack(side="left")
+        ttk.Button(viewer, text="Export readable CSV/Excel", command=self._export_matrix_json).pack(side="left", padx=6, pady=2)
 
         log_frame = ttk.LabelFrame(self, text="Log")
         log_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -550,6 +574,11 @@ class MainApp(tk.Tk):
         if path:
             self.var_address.set(path)
 
+    def _browse_matrix_json(self):
+        path = filedialog.askopenfilename(title="Select matrix JSON", filetypes=[("JSON", "*.json"), ("All files", "*.*")])
+        if path:
+            self.var_matrix_json.set(path)
+
     def _verify_address(self):
         path = Path(self.var_address.get())
         if not path.is_file():
@@ -588,6 +617,24 @@ class MainApp(tk.Tk):
             return
         popup = PortsPopup(self, Path(self.var_address.get()), self.log)
         popup.wait_window()
+
+    def _export_matrix_json(self):
+        raw = self.var_matrix_json.get().strip()
+        if not raw:
+            messagebox.showwarning("Select JSON", "Choose a matrix JSON file first.")
+            return
+        json_path = Path(raw)
+        if not json_path.exists():
+            messagebox.showerror("File missing", f"Cannot find {json_path}")
+            return
+        try:
+            output = PG.export_matrix_json_to_excel(json_path)
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Export failed", str(exc))
+            return
+        self.log.insert("end", f"Readable workbook created: {output}\n")
+        self.log.see("end")
+        messagebox.showinfo("Export complete", f"Readable workbook saved to\n{output}")
 
 
 def main():
