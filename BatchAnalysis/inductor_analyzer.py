@@ -68,7 +68,7 @@ def main():
         choices=["hover", "static", "none"],
         default="hover",
         help=(
-            "How to display design names: 'hover' shows tooltips on click using mplcursors, "
+            "How to display design names: 'hover' shows tooltips using mplcursors, "
             "'static' writes labels on the plot, and 'none' hides labels."
         ),
     )
@@ -148,13 +148,10 @@ def main():
             try:
                 import mplcursors
 
-                cursor = mplcursors.cursor(scatter_ax.collections[0], hover=False)
-
-                def _on_add(sel):
-                    sel.annotation.set_text(df_type.iloc[sel.index]['folder'])
-                    sel.annotation.set_visible(True)
-
-                cursor.connect("add", _on_add)
+                cursor = mplcursors.cursor(scatter_ax.collections[0], hover=True)
+                cursor.connect(
+                    "add", lambda sel: sel.annotation.set_text(df_type.iloc[sel.index]['folder'])
+                )
             except ImportError:
                 print("mplcursors not installed; falling back to static labels.")
                 _add_static_labels()
