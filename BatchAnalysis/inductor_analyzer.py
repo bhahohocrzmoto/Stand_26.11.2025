@@ -66,7 +66,7 @@ def main():
     parser.add_argument(
         "--label-mode",
         choices=["hover", "static", "none"],
-        default="hover",
+        default="none",
         help=(
             "How to display design names: 'hover' shows tooltips using mplcursors, "
             "'static' writes labels on the plot, and 'none' hides labels."
