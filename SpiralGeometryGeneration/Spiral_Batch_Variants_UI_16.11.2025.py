@@ -32,8 +32,9 @@ import importlib.util
 import shutil
 from dataclasses import dataclass
 from decimal import Decimal, getcontext
+from math import isclose
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -52,6 +53,7 @@ class LayerSweep:
     n_min: float
     n_max: float
     n_step: float
+    nk_target: Optional[float]
     allow_cw: bool
     allow_ccw: bool
 
@@ -397,6 +399,7 @@ class BatchApp(tk.Tk):
             "N_min": tk.StringVar(value="1.0"),
             "N_max": tk.StringVar(value="3.0"),
             "N_step": tk.StringVar(value="0.5"),
+            "NK": tk.StringVar(value=""),
             "cw": tk.BooleanVar(value=True if idx == 0 else False),
             "ccw": tk.BooleanVar(value=True),
         }
@@ -435,7 +438,18 @@ class BatchApp(tk.Tk):
             child.destroy()
 
         # Header row
-        headers = ["Layer", "K_min", "K_max", "K_step", "N_min", "N_max", "N_step", "CW", "CCW"]
+        headers = [
+            "Layer",
+            "K_min",
+            "K_max",
+            "K_step",
+            "N_min",
+            "N_max",
+            "N_step",
+            "NK",
+            "CW",
+            "CCW",
+        ]
         for col, txt in enumerate(headers):
             ttk.Label(self.layer_frame, text=txt).grid(row=0, column=col, sticky="nsew", padx=2, pady=2)
 
@@ -455,8 +469,10 @@ class BatchApp(tk.Tk):
             ttk.Entry(self.layer_frame, textvariable=vars_["N_max"], width=8).grid(row=r, column=5, sticky="ew", padx=2, pady=2)
             ttk.Entry(self.layer_frame, textvariable=vars_["N_step"], width=8).grid(row=r, column=6, sticky="ew", padx=2, pady=2)
 
-            ttk.Checkbutton(self.layer_frame, variable=vars_["cw"]).grid(row=r, column=7, sticky="n", padx=2, pady=2)
-            ttk.Checkbutton(self.layer_frame, variable=vars_["ccw"]).grid(row=r, column=8, sticky="n", padx=2, pady=2)
+            ttk.Entry(self.layer_frame, textvariable=vars_["NK"], width=8).grid(row=r, column=7, sticky="ew", padx=2, pady=2)
+
+            ttk.Checkbutton(self.layer_frame, variable=vars_["cw"]).grid(row=r, column=8, sticky="n", padx=2, pady=2)
+            ttk.Checkbutton(self.layer_frame, variable=vars_["ccw"]).grid(row=r, column=9, sticky="n", padx=2, pady=2)
 
     def _on_M_changed(self, *args):
         self._sync_layer_sweep_count()
@@ -552,7 +568,15 @@ class BatchApp(tk.Tk):
             if not (allow_cw or allow_ccw):
                 raise ValueError(f"Layer {i+1}: please select at least CW or CCW.")
 
-            sweeps.append(LayerSweep(k_min, k_max, k_step, n_min, n_max, n_step, allow_cw, allow_ccw))
+            nk_raw = v["NK"].get().strip()
+            try:
+                nk_target = float(nk_raw) if nk_raw != "" else None
+            except Exception:
+                raise ValueError(f"Layer {i+1}: NK must be blank or a number.")
+
+            sweeps.append(
+                LayerSweep(k_min, k_max, k_step, n_min, n_max, n_step, nk_target, allow_cw, allow_ccw)
+            )
 
         return sweeps
 
@@ -605,7 +629,16 @@ class BatchApp(tk.Tk):
                     dirs.append("CCW")
                 if sw.allow_cw:
                     dirs.append("CW")
-                states = [(K, N, d) for K in Ks for N in Ns for d in dirs]
+                states: List[Tuple[int, float, str]] = []
+                for K in Ks:
+                    for N in Ns:
+                        if sw.nk_target is not None:
+                            if N == 0:
+                                continue
+                            if not isclose(sw.nk_target / N, K, rel_tol=1e-9, abs_tol=1e-9):
+                                continue
+                        for d in dirs:
+                            states.append((K, N, d))
                 if not states:
                     raise ValueError(f"Layer {i+1}: sweep produced no combinations.")
                 all_layer_states.append(states)
