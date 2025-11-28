@@ -304,7 +304,7 @@ class MainApp(tk.Tk):
     def __init__(self):
         super().__init__(); self.title("Spirals main panel"); self.geometry("940x720")
         self.var_address = tk.StringVar(); self.var_eps = tk.StringVar(value="3.5"); self.var_matrix_json = tk.StringVar(); self.var_analysis_freq = tk.StringVar()
-        self.var_show_plot = tk.BooleanVar(value=False)
+        self.var_label_mode = tk.StringVar(value="hover"); self.var_show_plot = tk.BooleanVar(value=False)
         self._build_ui()
 
     def _build_ui(self):
@@ -334,6 +334,8 @@ class MainApp(tk.Tk):
         ttk.Entry(freq_row, textvariable=self.var_analysis_freq, width=20).pack(side="left", padx=6)
         ttk.Label(freq_row, text="(leave empty for highest)").pack(side="left")
         label_row = ttk.Frame(analysis_frame); label_row.pack(fill="x", padx=6, pady=(0, 4))
+        ttk.Label(label_row, text="Design labels:").pack(side="left")
+        ttk.Combobox(label_row, values=("hover", "static", "none"), textvariable=self.var_label_mode, width=10, state="readonly").pack(side="left", padx=4)
         ttk.Checkbutton(label_row, text="Open interactive plot window", variable=self.var_show_plot).pack(side="left", padx=12)
         button_frame = ttk.Frame(analysis_frame); button_frame.pack(fill="x", side="bottom", padx=6, pady=6)
         ttk.Button(button_frame, text="Finalize Inductor Analysis", command=self._run_inductor_analysis).pack(side="left", padx=6)
@@ -427,7 +429,7 @@ class MainApp(tk.Tk):
         addr_path = self.var_address.get(); freq = self.var_analysis_freq.get().strip()
         if not addr_path or not Path(addr_path).is_file(): messagebox.showerror("Address missing", "Select a valid Address.txt first."); return
         if not ANALYSIS_SCRIPT.exists(): messagebox.showerror("Missing script", f"Cannot find {ANALYSIS_SCRIPT}"); return
-        cmd = [sys.executable, str(ANALYSIS_SCRIPT), addr_path]
+        cmd = [sys.executable, str(ANALYSIS_SCRIPT), addr_path, "--label-mode", self.var_label_mode.get()]
         if freq: cmd.extend(["--frequency", freq])
         if self.var_show_plot.get(): cmd.append("--show-plot")
         if log_subprocess(cmd, self.log): messagebox.showinfo("Analysis Complete", "KPI analysis finished. Check the 'FinalTransformerAnalysis' folder.")
@@ -436,7 +438,7 @@ class MainApp(tk.Tk):
         addr_path = self.var_address.get(); freq = self.var_analysis_freq.get().strip()
         if not addr_path or not Path(addr_path).is_file(): messagebox.showerror("Address missing", "Select a valid Address.txt first."); return
         if not INDUCTOR_ANALYSIS_SCRIPT.exists(): messagebox.showerror("Missing script", f"Cannot find {INDUCTOR_ANALYSIS_SCRIPT}"); return
-        cmd = [sys.executable, str(INDUCTOR_ANALYSIS_SCRIPT), addr_path]
+        cmd = [sys.executable, str(INDUCTOR_ANALYSIS_SCRIPT), addr_path, "--label-mode", self.var_label_mode.get()]
         if freq: cmd.extend(["--frequency", freq])
         if self.var_show_plot.get(): cmd.append("--show-plot")
         if log_subprocess(cmd, self.log): messagebox.showinfo("Analysis Complete", "KPI analysis finished. Check the 'FinalInductorAnalysis' folder.")
