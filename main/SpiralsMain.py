@@ -25,7 +25,7 @@ SPIRAL_UI = REPO_ROOT / "SpiralGeometryGeneration" / "Spiral_Batch_Variants_UI_1
 FAST_UI = REPO_ROOT / "FastSolver" / "Automation" / "fast_solver_batch_ui.py"
 AUTOMATE = REPO_ROOT / "FastSolver" / "Automation" / "automate_solvers.py"
 PLOT_GEN = REPO_ROOT / "FastSolver" / "PlotGeneration" / "PlotGeneration.py"
-FINAL_SUMMARY = REPO_ROOT / "FastSolver" / "PlotGeneration" / "FinalSummaryTransformer.py"
+ANALYSIS_SCRIPT = REPO_ROOT / "BatchAnalysis" / "design_analyzer.py"
 
 sys.path.insert(0, str(REPO_ROOT))
 from FastSolver.PlotGeneration import PlotGeneration as PG  # type: ignore  # noqa: E402
@@ -494,6 +494,7 @@ class MainApp(tk.Tk):
         self.var_address = tk.StringVar()
         self.var_eps = tk.StringVar(value="3.5")
         self.var_matrix_json = tk.StringVar()
+        self.var_analysis_freq = tk.StringVar()
 
         self._build_ui()
 
@@ -528,7 +529,17 @@ class MainApp(tk.Tk):
         ttk.Entry(row_json, textvariable=self.var_matrix_json, width=70).pack(side="left", padx=6)
         ttk.Button(row_json, text="Browse…", command=self._browse_matrix_json).pack(side="left")
         ttk.Button(viewer, text="Export readable CSV/Excel", command=self._export_matrix_json).pack(side="left", padx=6, pady=2)
-        ttk.Button(viewer, text="FinalSummaryTransformer", command=self._run_final_summary).pack(side="left", padx=6, pady=2)
+
+        analysis_frame = ttk.LabelFrame(self, text="5) Final Analysis")
+        analysis_frame.pack(fill="x", padx=10, pady=8)
+
+        freq_row = ttk.Frame(analysis_frame)
+        freq_row.pack(fill="x", padx=6, pady=(4, 6))
+        ttk.Label(freq_row, text="Analysis Frequency (Hz):").pack(side="left")
+        ttk.Entry(freq_row, textvariable=self.var_analysis_freq, width=20).pack(side="left", padx=6)
+        ttk.Label(freq_row, text="(leave empty for highest)").pack(side="left")
+
+        ttk.Button(analysis_frame, text="Finalize Transformer Analysis", command=self._run_full_analysis).pack(side="right", padx=6, pady=6)
 
         log_frame = ttk.LabelFrame(self, text="Log")
         log_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -620,6 +631,25 @@ class MainApp(tk.Tk):
         popup = PortsPopup(self, Path(self.var_address.get()), self.log)
         popup.wait_window()
 
+    def _run_full_analysis(self):
+        addr_path = self.var_address.get()
+        if not addr_path or not Path(addr_path).is_file():
+            messagebox.showerror("Address missing", "Select a valid Address.txt first.")
+            return
+
+        if not ANALYSIS_SCRIPT.exists():
+            messagebox.showerror("Missing script", f"Cannot find {ANALYSIS_SCRIPT}")
+            return
+        
+        cmd = [sys.executable, str(ANALYSIS_SCRIPT), addr_path]
+        freq = self.var_analysis_freq.get().strip()
+        if freq:
+            cmd.extend(["--frequency", freq])
+
+        ok = log_subprocess(cmd, self.log)
+        if ok:
+            messagebox.showinfo("Analysis Complete", "KPI analysis finished. Check the 'FinalTransformerAnalysis' folder.")
+
     def _export_matrix_json(self):
         raw = self.var_matrix_json.get().strip()
         if not raw:
@@ -637,17 +667,6 @@ class MainApp(tk.Tk):
         self.log.insert("end", f"Readable workbook created: {output}\n")
         self.log.see("end")
         messagebox.showinfo("Export complete", f"Readable workbook saved to\n{output}")
-
-    def _run_final_summary(self):
-        if not self._verify_address():
-            return
-        addr = Path(self.var_address.get())
-        ok = log_subprocess([sys.executable, str(FINAL_SUMMARY), str(addr)], self.log)
-        if ok:
-            out_dir = addr.parent / "Final Summary Transformer"
-            self.log.insert("end", f"Final summary generated under: {out_dir}\n")
-            self.log.see("end")
-            messagebox.showinfo("Final summary complete", f"Reports saved to\n{out_dir}")
 
 
 def main():
