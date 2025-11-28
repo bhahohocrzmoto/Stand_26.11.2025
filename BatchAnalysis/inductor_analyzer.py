@@ -63,6 +63,20 @@ def main():
     parser = argparse.ArgumentParser(description="Run KPI analysis on inductor designs.")
     parser.add_argument("address_file", help="Path to the Address.txt file.")
     parser.add_argument("--frequency", help="Optional: Specific frequency in Hz.", default=None)
+    parser.add_argument(
+        "--label-mode",
+        choices=["hover", "static", "none"],
+        default="hover",
+        help=(
+            "How to display design names: 'hover' shows tooltips on click using mplcursors, "
+            "'static' writes labels on the plot, and 'none' hides labels."
+        ),
+    )
+    parser.add_argument(
+        "--show-plot",
+        action="store_true",
+        help="Open an interactive window for exploring the plot (useful with hover labels).",
+    )
     args = parser.parse_args()
 
     address_path = Path(args.address_file)
@@ -106,17 +120,53 @@ def main():
         print(f"\nSuccessfully saved '{port_type}' analysis to {csv_path}")
 
         plt.figure(figsize=(14, 10))
-        sns.scatterplot(data=df_type, x='effective_inductance_uH', y='quality_factor_Q', hue='estimated_srf_MHz',
-                        palette='viridis', size='estimated_srf_MHz', sizes=(50, 250), legend='auto')
+        scatter_ax = sns.scatterplot(
+            data=df_type,
+            x='effective_inductance_uH',
+            y='quality_factor_Q',
+            hue='estimated_srf_MHz',
+            palette='viridis',
+            size='estimated_srf_MHz',
+            sizes=(50, 250),
+            legend='auto'
+        )
         plt.title(f"{port_type.capitalize()} Inductor Performance @ {args.frequency or 'Max'} Hz")
         plt.xlabel('Effective Inductance (uH)'), plt.ylabel('Quality Factor (Q)'), plt.grid(True)
-        
-        for _, row in df_type.iterrows():
-            plt.text(row['effective_inductance_uH'] * 1.01, row['quality_factor_Q'], row['folder'], fontsize=9)
+
+        def _add_static_labels():
+            for _, row in df_type.iterrows():
+                plt.text(
+                    row['effective_inductance_uH'] * 1.01,
+                    row['quality_factor_Q'],
+                    row['folder'],
+                    fontsize=9
+                )
+
+        if args.label_mode == 'static':
+            _add_static_labels()
+        elif args.label_mode == 'hover':
+            try:
+                import mplcursors
+
+                cursor = mplcursors.cursor(scatter_ax.collections[0], hover=False)
+
+                def _on_add(sel):
+                    sel.annotation.set_text(df_type.iloc[sel.index]['folder'])
+                    sel.annotation.set_visible(True)
+
+                cursor.connect("add", _on_add)
+            except ImportError:
+                print("mplcursors not installed; falling back to static labels.")
+                _add_static_labels()
+
+        plt.tight_layout()
 
         plot_path = target_dir / f'{port_type}_performance_plot.png'
         plt.savefig(plot_path)
         print(f"Successfully saved '{port_type}' performance plot to {plot_path}")
+
+    if args.show_plot:
+        plt.show()
 
 if __name__ == "__main__":
     main()
