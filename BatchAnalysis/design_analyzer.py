@@ -1,10 +1,17 @@
 import json
+import re
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import argparse
 from pathlib import Path
+
+
+def sum_k_from_name(name: str) -> float:
+    """Return the sum of all K-values encoded in the folder name."""
+    k_matches = re.findall(r"K(\d+(?:\.\d+)?)", name)
+    return float(np.sum([float(k) for k in k_matches])) if k_matches else 0.0
 
 def get_freq_index(frequencies, target_freq=None):
     """Finds the index of the target frequency, or the highest frequency if not specified."""
@@ -58,11 +65,16 @@ def analyze_design_folder(folder_path: Path, target_freq: float | None) -> dict 
         srf_mhz /= 1e6
 
         return {
-            'folder': folder_path.name, 'frequency_Hz': f_selected, 'coupling_coefficient_k': k,
-            'quality_factor_Q': Q, 'ac_dc_resistance_ratio': ac_dc_ratio, 'symmetry_score': symmetry_score,
+            'folder': folder_path.name,
+            'frequency_Hz': f_selected,
+            'coupling_coefficient_k': k,
+            'quality_factor_Q': Q,
+            'ac_dc_resistance_ratio': ac_dc_ratio,
+            'symmetry_score': symmetry_score,
             'primary_self_capacitance_pF': C[p_idx, p_idx] * 1e12,
             'inter_winding_capacitance_pF': C[p_idx, s_idx] * 1e12,
-            'estimated_srf_MHz': srf_mhz
+            'estimated_srf_MHz': srf_mhz,
+            'total_k_sum': sum_k_from_name(folder_path.name)
         }
     except (KeyError, IndexError, json.JSONDecodeError) as e:
         print(f"Error processing {json_path}: {e}")
@@ -121,7 +133,7 @@ def main():
         y='quality_factor_Q',
         hue='estimated_srf_MHz',
         palette='viridis',
-        size='estimated_srf_MHz',
+        size='total_k_sum',
         sizes=(50, 250),
         legend='auto'
     )
