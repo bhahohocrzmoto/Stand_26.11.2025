@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
+from collections import Counter
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -376,9 +377,48 @@ class MainApp(tk.Tk):
                 messagebox.showinfo("Solvers complete", "FastHenry/FasterCap runs finished.")
                 self._open_ports_popup()
 
+    def _display_log_summary(self, log_path: Path):
+        """Reads the debug log and displays a summary in the UI log."""
+        if not log_path.is_file():
+            return  # No log file, nothing to summarize
+
+        self.log.insert("end", f"\n\n--- Summary of Plot Generation ---\n")
+        try:
+            with open(log_path, 'r', encoding='utf-8') as f:
+                logs = json.load(f)
+
+            event_counter = Counter()
+            for entry in logs:
+                event_key = (
+                    entry.get('stage', 'unknown'),
+                    entry.get('status', 'unknown'),
+                    entry.get('detail', 'unknown')
+                )
+                event_counter[event_key] += 1
+
+            if not event_counter:
+                self.log.insert("end", "Log is empty.\n")
+            else:
+                for (stage, status, detail), count in sorted(event_counter.items()):
+                    self.log.insert("end", f"\n- Event: [{stage}] / Status: [{status}]\n")
+                    self.log.insert("end", f"  Detail: {detail}\n")
+                    self.log.insert("end", f"  Occurrences: {count} times\n")
+
+        except Exception as e:
+            self.log.insert("end", f"Could not read or parse summary log: {e}\n")
+        
+        self.log.insert("end", f"--- End of Summary ---\n")
+        self.log.see("end")
+
     def _open_ports_popup(self):
         if not self.var_address.get(): messagebox.showwarning("Address needed", "Select Address.txt first."); return
-        popup = PortsPopup(self, Path(self.var_address.get()), self.log); popup.wait_window()
+        address_path = Path(self.var_address.get())
+        popup = PortsPopup(self, address_path, self.log)
+        popup.wait_window()
+
+        # After popup closes, find and display the summary from the debug log
+        debug_log_path = address_path.parent / PG.DEBUG_LOG_NAME
+        self._display_log_summary(debug_log_path)
 
     def _run_full_analysis(self):
         addr_path = self.var_address.get(); freq = self.var_analysis_freq.get().strip()
