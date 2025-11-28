@@ -72,6 +72,20 @@ def main():
     parser = argparse.ArgumentParser(description="Run KPI analysis on transformer designs.")
     parser.add_argument("address_file", help="Path to the Address.txt file.")
     parser.add_argument("--frequency", help="Optional: Specific frequency in Hz.", default=None)
+    parser.add_argument(
+        "--label-mode",
+        choices=["hover", "static", "none"],
+        default="hover",
+        help=(
+            "How to display design names: 'hover' shows tooltips using mplcursors, "
+            "'static' writes labels on the plot, and 'none' hides labels."
+        ),
+    )
+    parser.add_argument(
+        "--show-plot",
+        action="store_true",
+        help="Open an interactive window for exploring the plot (useful with hover labels).",
+    )
     args = parser.parse_args()
 
     address_path = Path(args.address_file)
@@ -101,19 +115,51 @@ def main():
 
     plt.figure(figsize=(12, 8))
     # A more relevant plot for transformers might be k vs Q
-    sns.scatterplot(data=df, x='coupling_coefficient_k', y='quality_factor_Q', hue='estimated_srf_MHz',
-                    palette='viridis', size='estimated_srf_MHz', sizes=(50, 250), legend='auto')
+    scatter_ax = sns.scatterplot(
+        data=df,
+        x='coupling_coefficient_k',
+        y='quality_factor_Q',
+        hue='estimated_srf_MHz',
+        palette='viridis',
+        size='estimated_srf_MHz',
+        sizes=(50, 250),
+        legend='auto'
+    )
     plt.title(f"Pareto Plot: Design Comparison @ {args.frequency or 'Max'} Hz")
     plt.xlabel('Coupling Coefficient (k)')
     plt.ylabel('Quality Factor (Q)')
     plt.grid(True)
-    
-    for _, row in df.iterrows():
-        plt.text(row['coupling_coefficient_k'] * 1.001, row['quality_factor_Q'], row['folder'], fontsize=9)
 
+    def _add_static_labels():
+        for _, row in df.iterrows():
+            plt.text(
+                row['coupling_coefficient_k'] * 1.001,
+                row['quality_factor_Q'],
+                row['folder'],
+                fontsize=9
+            )
+
+    if args.label_mode == 'static':
+        _add_static_labels()
+    elif args.label_mode == 'hover':
+        try:
+            import mplcursors
+
+            cursor = mplcursors.cursor(scatter_ax.collections[0], hover=True)
+            cursor.connect(
+                "add", lambda sel: sel.annotation.set_text(df.iloc[sel.index]['folder'])
+            )
+        except ImportError:
+            print("mplcursors not installed; falling back to static labels.")
+            _add_static_labels()
+
+    plt.tight_layout()
     plot_path = output_dir / 'design_pareto_plot.png'
     plt.savefig(plot_path)
     print(f"Successfully saved Pareto plot to {plot_path}")
+
+    if args.show_plot:
+        plt.show()
 
 if __name__ == "__main__":
     main()
