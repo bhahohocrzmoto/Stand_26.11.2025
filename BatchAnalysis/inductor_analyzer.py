@@ -1,4 +1,3 @@
-import os
 import json
 import numpy as np
 import pandas as pd
@@ -9,169 +8,115 @@ from pathlib import Path
 
 def get_freq_index(frequencies, target_freq=None):
     """Finds the index of the target frequency, or the highest frequency if not specified."""
-    if target_freq is None:
-        return np.argmax(frequencies)
+    if target_freq is None: return np.argmax(frequencies)
     try:
         target_freq = float(target_freq)
-        # Find the index of the frequency closest to the target
         return np.argmin(np.abs(frequencies - target_freq))
     except (ValueError, TypeError):
-        # Fallback to highest frequency if conversion fails
         return np.argmax(frequencies)
 
-def analyze_design_folder(folder_path, target_freq=None):
-    """
-    Analyzes a single design folder to calculate inductor KPIs from a JSON file.
-    """
-    json_path = os.path.join(folder_path, 'Analysis', 'matrices', 'inductor_matrices.json')
-
-    if not os.path.exists(json_path):
-        print(f"Warning: No JSON file found at {json_path}")
-        return None
-
+def analyze_inductor_json(json_path: Path, folder_name: str, target_freq: float | None) -> dict | None:
+    """Analyzes a single inductor matrix JSON file and returns a KPI dictionary."""
     try:
         with open(json_path, 'r') as f:
             data = json.load(f)
-    except Exception as e:
-        print(f"An error occurred while reading {json_path}: {e}")
-        return None
+        
+        analysis_type = data.get('analysis_type', 'unknown')
+        port_name = data.get('port_names', ['unknown'])[0]
+        
+        port_type = 'unknown'
+        if 'series' in analysis_type: port_type = 'series'
+        elif 'parallel' in analysis_type: port_type = 'parallel'
 
-    try:
         frequencies = np.array(data['frequencies_Hz'])
         L_port = np.array(data['matrices']['L_port'])
         R_port = np.array(data['matrices']['R_port'])
         C_port = np.array(data['matrices']['C_port'])
 
-        # C is frequency-independent
-        C = C_port
-
-        if L_port.ndim == 2: # Frequency-independent
-            L = L_port
-            R = R_port
-            f_selected = frequencies.item() if frequencies.size == 1 else frequencies[0]
-            R_dc = R
-        else: # Frequency-dependent (3D)
-            freq_idx = get_freq_index(frequencies, target_freq)
-            f_selected = frequencies[freq_idx]
-            L = L_port[freq_idx]
-            R = R_port[freq_idx]
-            min_freq_idx = np.argmin(frequencies)
-            R_dc = R_port[min_freq_idx]
-        
+        freq_idx = get_freq_index(frequencies, target_freq)
+        f_selected = frequencies[freq_idx]
+        min_freq_idx = np.argmin(frequencies)
         omega = 2 * np.pi * f_selected
-        num_ports = L.shape[0]
-        kpis_list = []
 
-        for i in range(num_ports):
-            l_eff = L[i, i]
-            r_ac = R[i, i]
-            c_self = C[i, i]
-            
-            # Safely get DC resistance
-            r_dc_val = R_dc[i, i] if R_dc.ndim == 2 else R_dc[0]
+        L = L_port[freq_idx] if L_port.ndim == 3 else L_port
+        R = R_port[freq_idx] if R_port.ndim == 3 else R_port
+        C = C_port
+        R_dc = R_port[min_freq_idx] if R_port.ndim == 3 else R_port
 
-            q_factor = (omega * l_eff) / r_ac if r_ac > 0 else 0
-            ac_dc_ratio = r_ac / r_dc_val if r_dc_val > 0 else 0
-            
-            srf_mhz = 0
-            if l_eff > 0 and c_self > 0:
-                srf_mhz = (1 / (2 * np.pi * np.sqrt(l_eff * c_self))) / 1e6
-            
-            kpis_list.append({
-                'folder': os.path.basename(folder_path),
-                'port': i + 1,
-                'frequency_Hz': f_selected,
-                'effective_inductance_uH': l_eff * 1e6,
-                'quality_factor_Q': q_factor,
-                'ac_dc_resistance_ratio': ac_dc_ratio,
-                'self_capacitance_pF': c_self * 1e12,
-                'estimated_srf_MHz': srf_mhz,
-            })
-            
-        return kpis_list
+        l_eff, r_ac, c_self, r_dc_val = L[0, 0], R[0, 0], C[0, 0], R_dc[0, 0]
 
-    except (KeyError, IndexError) as e:
-        print(f"Error: Data structure incorrect in {json_path}. Missing key or index: {e}")
+        q_factor = (omega * l_eff) / r_ac if r_ac > 0 else 0
+        ac_dc_ratio = r_ac / r_dc_val if r_dc_val > 0 else 0
+        srf_mhz = (1 / (2 * np.pi * np.sqrt(l_eff * c_self))) / 1e6 if l_eff > 0 and c_self > 0 else 0
+
+        return {
+            'folder': folder_name, 'port_name': port_name, 'port_type': port_type,
+            'frequency_Hz': f_selected, 'effective_inductance_uH': l_eff * 1e6,
+            'quality_factor_Q': q_factor, 'ac_dc_resistance_ratio': ac_dc_ratio,
+            'self_capacitance_pF': c_self * 1e12, 'estimated_srf_MHz': srf_mhz,
+        }
+    except (KeyError, IndexError, json.JSONDecodeError) as e:
+        print(f"Error processing {json_path}: {e}")
         return None
 
 def main():
-    """
-    Main function to run the batch analysis for inductors.
-    """
     parser = argparse.ArgumentParser(description="Run KPI analysis on inductor designs.")
     parser.add_argument("address_file", help="Path to the Address.txt file.")
-    parser.add_argument("--frequency", help="Optional: Specific frequency in Hz to analyze. Defaults to the highest available.", default=None)
+    parser.add_argument("--frequency", help="Optional: Specific frequency in Hz.", default=None)
     args = parser.parse_args()
 
     address_path = Path(args.address_file)
     if not address_path.is_file():
-        print(f"Error: Address file not found at {address_path}")
-        return
+        print(f"Error: Address file not found at {address_path}"); return
 
     base_dir = address_path.parent
     output_dir = base_dir / "FinalInductorAnalysis"
-    output_dir.mkdir(exist_ok=True)
+    series_dir = output_dir / "Series"; parallel_dir = output_dir / "Parallel"
+    series_dir.mkdir(parents=True, exist_ok=True); parallel_dir.mkdir(parents=True, exist_ok=True)
     
     try:
-        with open(address_path, 'r') as f:
-            folder_paths = [str(base_dir / line.strip()) for line in f if line.strip()]
-    except FileNotFoundError:
-        print(f"Error: {address_path} not found.")
-        return
+        folder_paths = [base_dir / line.strip() for line in address_path.read_text().splitlines() if line.strip()]
+    except Exception as e:
+        print(f"Error reading {address_path}: {e}"); return
 
     results = []
-    missing_json_folders = []
-
     for folder in folder_paths:
-        if not Path(folder).exists():
-            print(f"Warning: Folder not found: {folder}")
-            missing_json_folders.append(folder)
-            continue
-        kpis = analyze_design_folder(folder, target_freq=args.frequency)
-        if kpis:
-            results.extend(kpis)
-        else:
-            missing_json_folders.append(folder)
+        if not folder.exists(): continue
+        matrices_dir = folder / 'Analysis' / 'matrices'
+        if not matrices_dir.exists(): continue
+        
+        for json_file in matrices_dir.glob('*_inductor_matrices.json'):
+            kpis = analyze_inductor_json(json_file, folder.name, args.frequency)
+            if kpis: results.append(kpis)
+    
+    print(f"\nFound and processed {len(results)} inductor analysis files.")
 
     if not results:
-        print("No valid data found to process. Exiting.")
-        return
+        print("No valid inductor data found to process. Exiting."); return
 
     df = pd.DataFrame(results)
-    
-    csv_path = output_dir / 'inductor_comparison.csv'
-    df.to_csv(csv_path, index=False)
-    print(f"Successfully saved analysis to {csv_path}")
+    for port_type in ['series', 'parallel']:
+        df_type = df[df['port_type'] == port_type]
+        if df_type.empty:
+            print(f"\nNo data found for '{port_type}' inductors."); continue
 
-    # Generate and save plot
-    plt.figure(figsize=(14, 10))
-    sns.scatterplot(
-        data=df,
-        x='effective_inductance_uH',
-        y='quality_factor_Q',
-        hue='estimated_srf_MHz',
-        palette='viridis',
-        size='estimated_srf_MHz',
-        sizes=(50, 250),
-        legend='auto'
-    )
-    plt.title(f"Inductor Performance Comparison @ {args.frequency or 'Max'} Hz")
-    plt.xlabel('Effective Inductance (uH)')
-    plt.ylabel('Quality Factor (Q)')
-    plt.grid(True)
-    
-    for i, row in df.iterrows():
-        label = f"{row['folder']} (P{row['port']})"
-        plt.text(row['effective_inductance_uH'] * 1.01, row['quality_factor_Q'], label, fontsize=9)
+        target_dir = series_dir if port_type == 'series' else parallel_dir
+        csv_path = target_dir / f'{port_type}_comparison.csv'
+        df_type.to_csv(csv_path, index=False)
+        print(f"\nSuccessfully saved '{port_type}' analysis to {csv_path}")
 
-    plot_path = output_dir / 'inductor_performance_plot.png'
-    plt.savefig(plot_path)
-    print(f"Successfully saved performance plot to {plot_path}")
+        plt.figure(figsize=(14, 10))
+        sns.scatterplot(data=df_type, x='effective_inductance_uH', y='quality_factor_Q', hue='estimated_srf_MHz',
+                        palette='viridis', size='estimated_srf_MHz', sizes=(50, 250), legend='auto')
+        plt.title(f"{port_type.capitalize()} Inductor Performance @ {args.frequency or 'Max'} Hz")
+        plt.xlabel('Effective Inductance (uH)'), plt.ylabel('Quality Factor (Q)'), plt.grid(True)
+        
+        for _, row in df_type.iterrows():
+            plt.text(row['effective_inductance_uH'] * 1.01, row['quality_factor_Q'], row['folder'], fontsize=9)
 
-    if missing_json_folders:
-        print("\nCould not process the following folders (missing JSON or folder not found):")
-        for folder in missing_json_folders:
-            print(f"- {folder}")
+        plot_path = target_dir / f'{port_type}_performance_plot.png'
+        plt.savefig(plot_path)
+        print(f"Successfully saved '{port_type}' performance plot to {plot_path}")
 
 if __name__ == "__main__":
     main()
