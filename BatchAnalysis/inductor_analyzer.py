@@ -63,6 +63,11 @@ def main():
     parser = argparse.ArgumentParser(description="Run KPI analysis on inductor designs.")
     parser.add_argument("address_file", help="Path to the Address.txt file.")
     parser.add_argument("--frequency", help="Optional: Specific frequency in Hz.", default=None)
+    parser.add_argument(
+        "--show-plot",
+        action="store_true",
+        help="Open an interactive window for exploring the plot.",
+    )
     args = parser.parse_args()
 
     address_path = Path(args.address_file)
@@ -110,13 +115,13 @@ def main():
                         palette='viridis', size='estimated_srf_MHz', sizes=(50, 250), legend='auto')
         plt.title(f"{port_type.capitalize()} Inductor Performance @ {args.frequency or 'Max'} Hz")
         plt.xlabel('Effective Inductance (uH)'), plt.ylabel('Quality Factor (Q)'), plt.grid(True)
-        
-        for _, row in df_type.iterrows():
-            plt.text(row['effective_inductance_uH'] * 1.01, row['quality_factor_Q'], row['folder'], fontsize=9)
 
         plot_path = target_dir / f'{port_type}_performance_plot.png'
         plt.savefig(plot_path)
         print(f"Successfully saved '{port_type}' performance plot to {plot_path}")
+
+    if args.show_plot:
+        plt.show()
 
 if __name__ == "__main__":
     main()

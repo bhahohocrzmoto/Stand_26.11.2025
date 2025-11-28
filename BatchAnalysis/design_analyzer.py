@@ -72,6 +72,11 @@ def main():
     parser = argparse.ArgumentParser(description="Run KPI analysis on transformer designs.")
     parser.add_argument("address_file", help="Path to the Address.txt file.")
     parser.add_argument("--frequency", help="Optional: Specific frequency in Hz.", default=None)
+    parser.add_argument(
+        "--show-plot",
+        action="store_true",
+        help="Open an interactive window for exploring the plot.",
+    )
     args = parser.parse_args()
 
     address_path = Path(args.address_file)
@@ -107,13 +112,13 @@ def main():
     plt.xlabel('Coupling Coefficient (k)')
     plt.ylabel('Quality Factor (Q)')
     plt.grid(True)
-    
-    for _, row in df.iterrows():
-        plt.text(row['coupling_coefficient_k'] * 1.001, row['quality_factor_Q'], row['folder'], fontsize=9)
 
     plot_path = output_dir / 'design_pareto_plot.png'
     plt.savefig(plot_path)
     print(f"Successfully saved Pareto plot to {plot_path}")
+
+    if args.show_plot:
+        plt.show()
 
 if __name__ == "__main__":
     main()
