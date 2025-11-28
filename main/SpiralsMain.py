@@ -26,6 +26,7 @@ FAST_UI = REPO_ROOT / "FastSolver" / "Automation" / "fast_solver_batch_ui.py"
 AUTOMATE = REPO_ROOT / "FastSolver" / "Automation" / "automate_solvers.py"
 PLOT_GEN = REPO_ROOT / "FastSolver" / "PlotGeneration" / "PlotGeneration.py"
 ANALYSIS_SCRIPT = REPO_ROOT / "BatchAnalysis" / "design_analyzer.py"
+INDUCTOR_ANALYSIS_SCRIPT = REPO_ROOT / "BatchAnalysis" / "inductor_analyzer.py"
 
 sys.path.insert(0, str(REPO_ROOT))
 from FastSolver.PlotGeneration import PlotGeneration as PG  # type: ignore  # noqa: E402
@@ -539,7 +540,11 @@ class MainApp(tk.Tk):
         ttk.Entry(freq_row, textvariable=self.var_analysis_freq, width=20).pack(side="left", padx=6)
         ttk.Label(freq_row, text="(leave empty for highest)").pack(side="left")
 
-        ttk.Button(analysis_frame, text="Finalize Transformer Analysis", command=self._run_full_analysis).pack(side="right", padx=6, pady=6)
+        button_frame = ttk.Frame(analysis_frame)
+        button_frame.pack(fill="x", side="bottom", padx=6, pady=6)
+        
+        ttk.Button(button_frame, text="Finalize Inductor Analysis", command=self._run_inductor_analysis).pack(side="left", padx=6)
+        ttk.Button(button_frame, text="Finalize Transformer Analysis", command=self._run_full_analysis).pack(side="right", padx=6)
 
         log_frame = ttk.LabelFrame(self, text="Log")
         log_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -649,6 +654,25 @@ class MainApp(tk.Tk):
         ok = log_subprocess(cmd, self.log)
         if ok:
             messagebox.showinfo("Analysis Complete", "KPI analysis finished. Check the 'FinalTransformerAnalysis' folder.")
+
+    def _run_inductor_analysis(self):
+        addr_path = self.var_address.get()
+        if not addr_path or not Path(addr_path).is_file():
+            messagebox.showerror("Address missing", "Select a valid Address.txt first.")
+            return
+
+        if not INDUCTOR_ANALYSIS_SCRIPT.exists():
+            messagebox.showerror("Missing script", f"Cannot find {INDUCTOR_ANALYSIS_SCRIPT}")
+            return
+        
+        cmd = [sys.executable, str(INDUCTOR_ANALYSIS_SCRIPT), addr_path]
+        freq = self.var_analysis_freq.get().strip()
+        if freq:
+            cmd.extend(["--frequency", freq])
+
+        ok = log_subprocess(cmd, self.log)
+        if ok:
+            messagebox.showinfo("Analysis Complete", "KPI analysis finished. Check the 'FinalInductorAnalysis' folder.")
 
     def _export_matrix_json(self):
         raw = self.var_matrix_json.get().strip()
