@@ -24,6 +24,7 @@ INDUCTOR_ANALYSIS_SCRIPT = REPO_ROOT / "BatchAnalysis" / "inductor_analyzer.py"
 
 sys.path.insert(0, str(REPO_ROOT))
 from FastSolver.PlotGeneration import PlotGeneration as PG
+from FastSolver.Automation import fast_solver_batch_ui
 
 PHASE_LETTERS = ("A", "B", "C")
 
@@ -304,6 +305,9 @@ class MainApp(tk.Tk):
     def __init__(self):
         super().__init__(); self.title("Spirals main panel"); self.geometry("940x720")
         self.var_address = tk.StringVar(); self.var_eps = tk.StringVar(value="3.5"); self.var_matrix_json = tk.StringVar(); self.var_analysis_freq = tk.StringVar()
+        self.var_freq_min = tk.StringVar(value=str(fast_solver_batch_ui.DEFAULT_FMIN))
+        self.var_freq_max = tk.StringVar(value=str(fast_solver_batch_ui.DEFAULT_FMAX))
+        self.var_points_per_decade = tk.StringVar(value=str(fast_solver_batch_ui.DEFAULT_NDEC))
         self.var_label_mode = tk.StringVar(value="hover"); self.var_show_plot = tk.BooleanVar(value=False)
         self._build_ui()
 
@@ -321,6 +325,13 @@ class MainApp(tk.Tk):
         ttk.Label(eps_row, text="Permittivity (eps_r):").pack(side="left")
         ttk.Entry(eps_row, textvariable=self.var_eps, width=12).pack(side="left", padx=6)
         solver = ttk.LabelFrame(self, text="3) Solve"); solver.pack(fill="x", padx=10, pady=8)
+        freq_row = ttk.Frame(solver); freq_row.pack(fill="x", padx=6, pady=4)
+        ttk.Label(freq_row, text="Frequency sweep (Hz):").pack(side="left")
+        ttk.Entry(freq_row, textvariable=self.var_freq_min, width=14).pack(side="left", padx=(6, 2))
+        ttk.Label(freq_row, text="to").pack(side="left")
+        ttk.Entry(freq_row, textvariable=self.var_freq_max, width=14).pack(side="left", padx=(2, 6))
+        ttk.Label(freq_row, text="Points/decade:").pack(side="left")
+        ttk.Entry(freq_row, textvariable=self.var_points_per_decade, width=10).pack(side="left", padx=6)
         ttk.Button(solver, text="Run conversion + solvers", command=self._run_pipeline).pack(side="left", padx=6, pady=6)
         ttk.Button(solver, text="Configure ports / plots", command=self._open_ports_popup).pack(side="left", padx=6)
         viewer = ttk.LabelFrame(self, text="4) Matrix review"); viewer.pack(fill="x", padx=10, pady=8)
@@ -374,10 +385,40 @@ class MainApp(tk.Tk):
         if missing: messagebox.showwarning("Missing folders", "\n".join(str(m) for m in missing)); return False
         messagebox.showinfo("Address check", f"{len(entries)} folders found."); return True
 
+    def _collect_frequency_args(self) -> Optional[List[str]]:
+        args: List[str] = []
+        for label, var, flag in (
+            ("Minimum frequency", self.var_freq_min, "--fmin"),
+            ("Maximum frequency", self.var_freq_max, "--fmax"),
+            ("Points per decade", self.var_points_per_decade, "--ndec"),
+        ):
+            raw = var.get().strip()
+            if not raw:
+                continue
+            try:
+                value = float(raw.replace(",", ""))
+            except ValueError:
+                messagebox.showerror("Invalid input", f"{label} must be a number.")
+                return None
+            if value <= 0:
+                messagebox.showerror("Invalid input", f"{label} must be greater than zero.")
+                return None
+            args.extend([flag, str(value)])
+        return args
+
     def _run_pipeline(self):
         if not self._verify_address(): return
         addr, eps = Path(self.var_address.get()), self.var_eps.get().strip() or "1"
-        if log_subprocess([sys.executable, str(REPO_ROOT / "FastSolver" / "Automation" / "fast_solver_batch_ui.py"), "--non-interactive", str(addr)], self.log):
+        freq_args = self._collect_frequency_args()
+        if freq_args is None:
+            return
+        batch_cmd = [
+            sys.executable,
+            str(REPO_ROOT / "FastSolver" / "Automation" / "fast_solver_batch_ui.py"),
+            "--non-interactive",
+            str(addr),
+        ] + freq_args
+        if log_subprocess(batch_cmd, self.log):
             if log_subprocess([sys.executable, str(AUTOMATE), str(addr), eps], self.log):
                 messagebox.showinfo("Solvers complete", "FastHenry/FasterCap runs finished.")
                 self._open_ports_popup()
