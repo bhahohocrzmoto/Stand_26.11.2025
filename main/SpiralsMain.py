@@ -25,6 +25,7 @@ SPIRAL_UI = REPO_ROOT / "SpiralGeometryGeneration" / "Spiral_Batch_Variants_UI_1
 FAST_UI = REPO_ROOT / "FastSolver" / "Automation" / "fast_solver_batch_ui.py"
 AUTOMATE = REPO_ROOT / "FastSolver" / "Automation" / "automate_solvers.py"
 PLOT_GEN = REPO_ROOT / "FastSolver" / "PlotGeneration" / "PlotGeneration.py"
+FINAL_SUMMARY = REPO_ROOT / "FastSolver" / "PlotGeneration" / "FinalSummaryTransformer.py"
 
 sys.path.insert(0, str(REPO_ROOT))
 from FastSolver.PlotGeneration import PlotGeneration as PG  # type: ignore  # noqa: E402
@@ -527,6 +528,7 @@ class MainApp(tk.Tk):
         ttk.Entry(row_json, textvariable=self.var_matrix_json, width=70).pack(side="left", padx=6)
         ttk.Button(row_json, text="Browse…", command=self._browse_matrix_json).pack(side="left")
         ttk.Button(viewer, text="Export readable CSV/Excel", command=self._export_matrix_json).pack(side="left", padx=6, pady=2)
+        ttk.Button(viewer, text="FinalSummaryTransformer", command=self._run_final_summary).pack(side="left", padx=6, pady=2)
 
         log_frame = ttk.LabelFrame(self, text="Log")
         log_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -635,6 +637,17 @@ class MainApp(tk.Tk):
         self.log.insert("end", f"Readable workbook created: {output}\n")
         self.log.see("end")
         messagebox.showinfo("Export complete", f"Readable workbook saved to\n{output}")
+
+    def _run_final_summary(self):
+        if not self._verify_address():
+            return
+        addr = Path(self.var_address.get())
+        ok = log_subprocess([sys.executable, str(FINAL_SUMMARY), str(addr)], self.log)
+        if ok:
+            out_dir = addr.parent / "Final Summary Transformer"
+            self.log.insert("end", f"Final summary generated under: {out_dir}\n")
+            self.log.see("end")
+            messagebox.showinfo("Final summary complete", f"Reports saved to\n{out_dir}")
 
 
 def main():
